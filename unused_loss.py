@@ -36,7 +36,7 @@ def invert_rot_and_trans(rot, trans):
 #
 # Transforms the depth image using the transformation and intrinsics matrices
 def transform_depth_image(depth, rotation, translation, intrinsics):
-    translation = tf.expand_dims(tf.expand_dims(translation, 1), 1)
+    #translation = tf.expand_dims(tf.expand_dims(translation, 1), 1)
     depth = depth[:,:,:,0]
 
     _, height, width = tf.unstack(tf.shape(depth))
@@ -183,6 +183,8 @@ def weighted_ssim(x, y, weight, c1=0.01**2, c2=0.03**2, weight_epsilon=0.01):
         raise ValueError('Both c1 and c2 are infinite, SSIM loss is zero. This is '
                          'likely unintended.')
 
+    weight = tf.expand_dims(weight, -1)
+
     average_pooled_weight = avg_pool3x3(weight)
     weight_plus_epsilon = weight + weight_epsilon
     inverse_average_pooled_weight = 1.0 / (average_pooled_weight + weight_epsilon)
@@ -247,7 +249,8 @@ def loss_function(rgb1, rgb2, depth1, depth2, transformation, intrinsics):
 
     #rgb1, rgb2 = (rgb_images[:,:,:,:3], rgb_images[:,:,:,3:])
     #depth1, depth2 = (depth_images[:,:,:,0], depth_images[:,:,:,1])
-    rotation, translation = (transformation[:,:3,:3], transformation[:,:3,3])
+    #rotation, translation = (transformation[:,:3,:3], transformation[:,:3,3])
+    rotation, translation = (transformation[0], transformation[1])
 
     pixel_x, pixel_y, depth1_warped = transform_depth_image(depth1, rotation, translation, intrinsics)
 

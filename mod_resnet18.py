@@ -92,7 +92,7 @@ def encoder_resnet(input_tensor):
 
     return econv5, (econv4, econv3, econv2, econv1)
 
-def depth_prediction_resnet18unet(input_tensor):
+def depth_prediction_resnet18unet(input_tensor, res):
     padding_mode = 'REFLECT'
 
     bottleneck, (econv4, econv3, econv2, econv1) = encoder_resnet(input_tensor)
@@ -112,29 +112,72 @@ def depth_prediction_resnet18unet(input_tensor):
     upconv1 = conv2dt(16, [3, 3], padding='VALID', strides=2)(iconv2)
     iconv1 = conv2d(16)(upconv1)
 
-    depth_input = tf.image.resize(iconv1, (128, 416))
+    depth_input = tf.image.resize(iconv1, res)
 
     return conv2d(1, activation='softplus')(depth_input)
 
-def egonet(input_tensor):
-    conv = conv2d(16, strides=2, activation='relu')(input_tensor)
-    conv = conv2d(32, strides=2, activation='relu')(conv)
-    conv = conv2d(64, strides=2, activation='relu')(conv)
-    conv = conv2d(128, strides=2, activation='relu')(conv)
-    conv = conv2d(256, strides=2, activation='relu')(conv)
-    conv = conv2d(512, strides=2, activation='relu')(conv)
-    #conv = conv2d(1024, strides=2, activation='relu')(conv)
+# https://github.com/google-research/google-research/blob/ce4e9e70127b1560f73616fba657f01a2b388aee/depth_from_video_in_the_wild/motion_prediction_net.py#L202
+def refine_motion_field(motion_field, layer):
+    _, h, w, _ = tf.unstack(tf.shape(layer))
+    upsampled_motion_field = tf.image.resize(motion_field, [h, w])
 
-    conv = layers.GlobalAveragePooling2D()(conv)
-    transformation = layers.Dense(6)(conv) * 0.001
+    conv_input = tf.concat([upsampled_motion_field, layer], axis=3)
+    conv_output = conv2d(max(4, layer.shape.as_list()[-1]), kernel_size=3)(conv_input)
+    conv_input = conv2d(max(4, layer.shape.as_list()[-1]), kernel_size=3)(conv_input)
+    conv_output2 = conv2d(max(4, layer.shape.as_list()[-1]), kernel_size=3)(conv_input)
+    conv_output = tf.concat([conv_output, conv_output2], axis=-1)
 
-    foci = layers.Dense(2, activation='softplus')(conv)
-    offset = layers.Dense(2)(conv) + 0.5
+    return upsampled_motion_field + conv2d(motion_field.shape.as_list()[-1], kernel_size=1)(conv_output)
 
-    return transformation, foci, offset
+def egonet(input_tensor, batch_size):
+    conv1 = conv2d(16, strides=2, activation='relu')(input_tensor)
+    conv2 = conv2d(32, strides=2, activation='relu')(conv1)
+    conv3 = conv2d(64, strides=2, activation='relu')(conv2)
+    conv4 = conv2d(128, strides=2, activation='relu')(conv3)
+    conv5 = conv2d(256, strides=2, activation='relu')(conv4)
+    conv6 = conv2d(512, strides=2, activation='relu')(conv5)
+    #conv7 = conv2d(768, strides=2, activation='relu')(conv6)
 
-def get_model(input_tensor):
-    depth = depth_prediction_resnet18unet(input_tensor)
-    transformation, foci, offset = egonet(input_tensor)
+    #bottleneck = tf.reduce_mean(conv7, axis=[1, 2], keepdims=True)
+    bottleneck = tf.reduce_mean(conv6, axis=[1, 2], keepdims=True)
+    background_motion = conv2d(6, kernel_size=1)(bottleneck)
 
-    return keras.Model(input_tensor, (depth, transformation, foci, offset))
+    rotation = background_motion[:,0,0,:3] * tf.constant(0.001)
+    translation = background_motion[...,3:]
+
+    #residual_translation = refine_motion_field(translation, conv7)
+    residual_translation = refine_motion_field(translation, conv6)
+    residual_translation = refine_motion_field(residual_translation, conv5)
+    residual_translation = refine_motion_field(residual_translation, conv4)
+    residual_translation = refine_motion_field(residual_translation, conv3)
+    residual_translation = refine_motion_field(residual_translation, conv2)
+    residual_translation = refine_motion_field(residual_translation, conv1)
+    residual_translation = refine_motion_field(residual_translation, input_tensor)
+
+    translation *= tf.constant(0.001)
+    residual_translation *= tf.constant(0.001)
+
+    #conv = layers.GlobalAveragePooling2D()(conv)
+    #transformation = layers.Dense(6)(conv) * tf.constant(0.001)
+
+    foci = layers.Dense(2, activation='softplus')(bottleneck)[:,0,0,:]
+    offset = (layers.Dense(2)(bottleneck) + tf.constant(0.5))[:,0,0,:]
+
+    reso = tf.cast(input_tensor.shape[1:3], tf.float32)
+    foci, offsets = foci * reso, offset * reso
+
+    foci = tf.linalg.diag(foci)
+
+    intrinsic_mat = tf.concat([foci, tf.expand_dims(offsets, -1)], axis=-1)
+    last_row = tf.tile([[[0.0, 0.0, 1.0]]], [batch_size, 1, 1])
+    intrinsics = tf.concat([intrinsic_mat, last_row], axis=-2)
+
+    return (rotation, translation), residual_translation, intrinsics
+
+def get_model(input_tensor, batch_size, res):
+    # NOTE: Input shape == (BATCH_SIZE, RES[0], RES[1], 6)
+    #       where the channels refer to two images (first, second)
+    depth = depth_prediction_resnet18unet(input_tensor[...,:3], res)
+    transformation, res_trans, intrinsics = egonet(input_tensor, batch_size)
+
+    return keras.Model(input_tensor, (depth, transformation, res_trans, intrinsics))

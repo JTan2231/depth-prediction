@@ -141,7 +141,7 @@ def _spatial_transformer(img, coords):
 
   return output_img, mask
 
-def inverse_warp(img, depth, egomotion_mat, intrinsic_mat,
+"""def inverse_warp(img, depth, egomotion_mat, intrinsic_mat,
                  intrinsic_mat_inv):
 
   dims = tf.shape(img)
@@ -167,31 +167,36 @@ def inverse_warp(img, depth, egomotion_mat, intrinsic_mat,
   source_pixel_coords = tf.transpose(source_pixel_coords, perm=[0, 2, 3, 1])
   projected_img, mask = _spatial_transformer(img, source_pixel_coords)
 
-  return projected_img, mask
+  return projected_img, mask"""
 
-"""def inverse_warp(image, depth, egomotion, intrinsics, intrinsics_inv):
+def inverse_warp(image, depth, rotation_angles, translation, intrinsics, intrinsics_inv):
   depth = depth[...,0]
   height, width = depth.shape[1:3]
   grid = tf.squeeze(tf.stack(tf.meshgrid(tf.range(width), tf.range(height), (1,))), axis=3)
 
   grid = tf.cast(grid, tf.float32)
-  rot_mat = egomotion[:,:3,:3]#transform_utils.matrix_from_angles(rotation_angles)
+  rot_mat = transform_utils.matrix_from_angles(rotation_angles)
   # We have to treat separately the case of a per-image rotation vector and a
   # per-image rotation field, because the broadcasting capabilities of einsum
   # are limited.
-  # The calculation here is identical to the one in inverse_warp above.
-  # Howeverwe use einsum for better clarity. Under the hood, einsum performs
-  # the reshaping and invocation of BatchMatMul, instead of doing it manually,
-  # as in inverse_warp.
-  projected_rotation = tf.einsum('bij,bjk,bkl->bil', intrinsics, rot_mat,
-                                 intrinsics_inv)
-  pcoords = tf.einsum('bij,jhw,bhw->bihw', projected_rotation, grid, depth)
+  if rotation_angles.shape.ndims == 2:
+    # The calculation here is identical to the one in inverse_warp above.
+    # Howeverwe use einsum for better clarity. Under the hood, einsum performs
+    # the reshaping and invocation of BatchMatMul, instead of doing it manually,
+    # as in inverse_warp.
+    projected_rotation = tf.einsum('bij,bjk,bkl->bil', intrinsic_mat, rot_mat,
+                                   intrinsic_mat_inv)
+    pcoords = tf.einsum('bij,jhw,bhw->bihw', projected_rotation, grid, depth)
+  elif rotation_angles.shape.ndims == 4:
+    # We push the H and W dimensions to the end, and transpose the rotation
+    # matrix elements (as noted above).
+    rot_mat = tf.transpose(rot_mat, [0, 3, 4, 1, 2])
+    projected_rotation = tf.einsum('bij,bjkhw,bkl->bilhw', intrinsic_mat,
+                                   rot_mat, intrinsic_mat_inv)
+    pcoords = tf.einsum('bijhw,jhw,bhw->bihw', projected_rotation, grid, depth)
 
-  print(intrinsics)
-  print(egomotion[:,:3,3])
-  projected_translation = tf.einsum('bij,bhwj->bihw', intrinsics, tf.expand_dims(tf.expand_dims(egomotion[:,:3,3], 1), 1))
-
+  projected_translation = tf.einsum('bij,bhwj->bihw', intrinsic_mat,
+                                    translation)
   pcoords += projected_translation
   x, y, z = tf.unstack(pcoords, axis=1)
-
-  return x / z, y / z, z"""
+  return x / z, y / z, z

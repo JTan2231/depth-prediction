@@ -17,6 +17,9 @@ def map_decorator(function):
 
     return wrapper
 
+IMAGENET_MEAN = [0.485, 0.486, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+
 # returns the front-camera image given the frame
 # NOTE: images are taken at framerate of 10 FPS
 def get_waymo_dataset(batch_size, sequence_length, resolution=None, validation=False):
@@ -104,7 +107,7 @@ def get_transformation_matrix(quaternion, translation):
 
 # NOTE: images are taken at framerate of 20 FPS
 def get_nuscenes_dataset(batch_size, sequence_length, resolution=None):
-    trainval_path = "/home/joey/python/tensorflow/projects/odometry/data/nuscenes/trainval/"
+    trainval_path = "/home/joey/python/tensorflow/projects/odometry/data/nuscenes/sweeps/"
     corrupted_files = ["data/nuscenes/trainval/CAM_FRONT/n015-2018-08-03-15-21-40+0800__CAM_FRONT__1533281283262460.jpg"]
 
     def image_preprocess(filename):
@@ -120,9 +123,10 @@ def get_nuscenes_dataset(batch_size, sequence_length, resolution=None):
     filenames = []
     ego_tokens = []
 
-    with open(trainval_path+"labels/file_ego_pairs.txt") as f:
+    with open("/home/joey/python/tensorflow/projects/odometry/data/nuscenes/labels/file_ego_pairs.txt") as f:
         filenames_ego_tokens = [s for s in f.read().split('\n') if len(s) > 0][::2]
-        for pair in filenames_ego_tokens:
+        for i, pair in enumerate(filenames_ego_tokens):
+            print(f"{i} of {len(filenames_ego_tokens)}\t\t\r", end='')
             split = pair.split(',')
             if split[0] in corrupted_files:
                 print("Corrupted jpg caught.")
@@ -135,8 +139,10 @@ def get_nuscenes_dataset(batch_size, sequence_length, resolution=None):
     image_dataset = image_dataset.map(image_preprocess).batch(sequence_length, drop_remainder=True)
 
     # get ego poses
-    with open(trainval_path+"labels/extracted_poses.json", "r") as f:
-        ego_poses = np.array([d['transformation'] for d in json.loads(f.read())]).astype(np.float32)
+    #with open(trainval_path+"labels/extracted_poses.json", "r") as f:
+    #    ego_poses = np.array([d['transformation'] for d in json.loads(f.read())]).astype(np.float32)
+
+    ego_poses = np.array([np.reshape(np.array([0. for i in range(16)]), (4, 4)) for x in range(len(filenames))])
 
     ego_dataset = tf.data.Dataset.from_tensor_slices(ego_poses).batch(sequence_length, drop_remainder=True)
 
@@ -273,8 +279,43 @@ def get_kitti_odometry_dataset(batch_size, sequence_length, resolution=None, val
 
         return dataset
 
+def get_tfrec_dataset(batch_size, sequence_length, resolution=None, validation=False):
+    local_path = "/home/joey/python/tensorflow/projects/odometry/data/images/"
+
+    def image_preprocess(example):
+        tfrecord_format = {    
+        'image': tf.io.FixedLenFeature([], tf.string),    
+        'pose': tf.io.FixedLenFeature([16,], tf.float32)    
+        }
+            
+        example = tf.io.parse_single_example(example, tfrecord_format)
+        image = example['image']
+        pose = example['pose']
+
+        image = tf.io.decode_jpeg(image)    
+        image = tf.image.convert_image_dtype(image, tf.float32)    
+        if resolution is not None:    
+            image = tf.image.resize(image, resolution)    
+
+        image -= tf.reshape(IMAGENET_MEAN, (1, 1, 3))
+        image /= tf.reshape(IMAGENET_STD, (1, 1, 3))
+
+        # flattened 4x4 row-major matrix    
+        pose = tf.reshape(pose, (4, 4))
+
+        return image, pose
+
+    all_files = [f"{local_path}{s}" for s in os.listdir(local_path)]#local_files# + external_files
+    shuffle(all_files)
+
+    all_files = all_files
+    dataset = tf.data.TFRecordDataset(all_files).map(image_preprocess, num_parallel_calls=AUTOTUNE)
+    dataset = dataset.batch(sequence_length, drop_remainder=True).prefetch(AUTOTUNE)
+
+    return dataset
+
 def get_dataset(batch_size, sequence_length, validation_count=1000, buffer_size=1000, resolution=None, perm=None):
-    waymo_dataset, validation_dataset = get_waymo_dataset(batch_size, sequence_length, resolution)
+    #waymo_dataset, validation_dataset = get_waymo_dataset(batch_size, sequence_length, resolution)
     #nuscenes_dataset = get_nuscenes_dataset(batch_size, sequence_length, resolution)
     #kitti_dataset = get_kitti_odometry_dataset(batch_size, sequence_length, resolution)
 
@@ -298,8 +339,9 @@ def get_dataset(batch_size, sequence_length, validation_count=1000, buffer_size=
         validation_dataset = sets[names[missing]]
         validation_name = names[missing]"""
 
-    #total_dataset = nuscenes_dataset.concatenate(kitti_dataset).concatenate(waymo_dataset)
-    train_dataset = waymo_dataset
+    # both nuScenes and Waymo
+    train_dataset = get_tfrec_dataset(batch_size, sequence_length, resolution)#nuscenes_dataset#.concatenate(waymo_dataset)
+    #train_dataset = waymo_dataset
     validation_dataset = None
 
     #train_dataset = total_dataset.skip(validation_count).shuffle(buffer_size).batch(batch_size, drop_remainder=True).repeat()
