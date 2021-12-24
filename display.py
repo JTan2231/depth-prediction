@@ -12,7 +12,7 @@ tf.config.experimental.set_memory_growth(physical_devices[0], True)
 IMAGENET_MEAN = tf.reshape([0.485, 0.486, 0.406], (1, 1, 3))
 IMAGENET_STD = tf.reshape([0.229, 0.224, 0.225], (1, 1, 3))
 
-RESOLUTION = (128, 416)
+RESOLUTION = (240, 360)
 
 kitti_base = "./data/kitti/dataset/sequences/"
 kitti_folders = [kitti_base+s+'/' for s in os.listdir(kitti_base)]
