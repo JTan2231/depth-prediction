@@ -1,3 +1,5 @@
+import random
+import string
 import tensorflow as tf
 import tensorflow.keras as keras
 import tensorflow.keras.layers as layers
@@ -129,6 +131,22 @@ def refine_motion_field(motion_field, layer):
 
     return upsampled_motion_field + conv2d(motion_field.shape.as_list()[-1], kernel_size=1)(conv_output)
 
+def id_generator(size=6, chars=string.ascii_uppercase + string.digits):
+    return ''.join(random.choice(chars) for _ in range(size))
+
+class Var(layers.Layer):
+    def __init__(self, value_min):
+        super().__init__()
+
+        self.value_min = value_min
+        self.value = tf.Variable(0.01, constraint=self.constraint, name=id_generator(10))
+
+    def constraint(self, x):
+        return tf.nn.relu(x - self.value_min) + self.value_min
+
+    def call(self, input_tensor):
+        return input_tensor * self.value
+
 def egonet(input_tensor, batch_size):
     conv1 = conv2d(16, strides=2, activation='relu')(input_tensor)
     conv2 = conv2d(32, strides=2, activation='relu')(conv1)
@@ -136,17 +154,17 @@ def egonet(input_tensor, batch_size):
     conv4 = conv2d(128, strides=2, activation='relu')(conv3)
     conv5 = conv2d(256, strides=2, activation='relu')(conv4)
     conv6 = conv2d(512, strides=2, activation='relu')(conv5)
-    #conv7 = conv2d(768, strides=2, activation='relu')(conv6)
+    conv7 = conv2d(1024, strides=2, activation='relu')(conv6)
 
-    #bottleneck = tf.reduce_mean(conv7, axis=[1, 2], keepdims=True)
-    bottleneck = tf.reduce_mean(conv6, axis=[1, 2], keepdims=True)
+    bottleneck = tf.reduce_mean(conv7, axis=[1, 2], keepdims=True)
+    #bottleneck = tf.reduce_mean(conv6, axis=[1, 2], keepdims=True)
     background_motion = conv2d(6, kernel_size=1)(bottleneck)
 
-    rotation = background_motion[:,0,0,:3] * tf.constant(0.001)
+    rotation = Var(0.001)(background_motion[:,0,0,:3])
     translation = background_motion[...,3:]
 
-    #residual_translation = refine_motion_field(translation, conv7)
-    residual_translation = refine_motion_field(translation, conv6)
+    residual_translation = refine_motion_field(translation, conv7)
+    residual_translation = refine_motion_field(residual_translation, conv6)
     residual_translation = refine_motion_field(residual_translation, conv5)
     residual_translation = refine_motion_field(residual_translation, conv4)
     residual_translation = refine_motion_field(residual_translation, conv3)
@@ -154,16 +172,15 @@ def egonet(input_tensor, batch_size):
     residual_translation = refine_motion_field(residual_translation, conv1)
     residual_translation = refine_motion_field(residual_translation, input_tensor)
 
-    translation *= tf.constant(0.001)
-    residual_translation *= tf.constant(0.001)
+    translation_scale = Var(0.001)
 
-    #conv = layers.GlobalAveragePooling2D()(conv)
-    #transformation = layers.Dense(6)(conv) * tf.constant(0.001)
+    translation = translation_scale(translation)
+    residual_translation = translation_scale(residual_translation)
 
-    foci = layers.Dense(2, activation='softplus')(bottleneck)[:,0,0,:]
-    offset = (layers.Dense(2)(bottleneck) + tf.constant(0.5))[:,0,0,:]
+    foci = layers.Conv2D(2, 1, activation='softplus')(bottleneck)[:,0,0,:]
+    offset = (layers.Conv2D(2, 1)(bottleneck) + tf.constant(0.5))[:,0,0,:]
 
-    reso = tf.cast(input_tensor.shape[1:3], tf.float32)
+    reso = tf.cast([input_tensor.shape[2], input_tensor.shape[1]], tf.float32)
     foci, offsets = foci * reso, offset * reso
 
     foci = tf.linalg.diag(foci)

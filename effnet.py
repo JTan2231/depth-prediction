@@ -1,3 +1,5 @@
+import string
+import random
 import tensorflow as tf
 import tensorflow.keras as keras
 import tensorflow.keras.layers as layers
@@ -53,7 +55,7 @@ def mb_conv_block(input_tensor, input_filters, output_filters, kernel_size=3, st
     else:
         x = input_tensor
 
-    x = layers.DepthwiseConv2D(kernel_size, strides, padding=pad, use_bias=False)(x)
+    x = layers.DepthwiseConv2D(kernel_size, strides, padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.Activation(activation)(x)
 
@@ -75,7 +77,7 @@ def mb_conv_block(input_tensor, input_filters, output_filters, kernel_size=3, st
         else:
             shortcut = tf.image.resize(input_tensor, x.shape[1:3])#tf.nn.max_pool(input_tensor, [1, strides, strides, 1], [1, strides, strides, 1], 'VALID')
     else:
-        shortcut = layers.Conv2D(output_filters, kernel_size, strides=strides, padding=pad, use_bias=False)(input_tensor)
+        shortcut = layers.Conv2D(output_filters, kernel_size, strides=strides, padding='same', use_bias=False)(input_tensor)
 
     x = x + shortcut
     x = tf.nn.swish(x)
@@ -92,10 +94,10 @@ def encoder_effnet(input_tensor):
     econv2 = mb_conv_block(conv, 24, 40, strides=1)
 
     conv = mb_conv_block(econv2, 40, 80)
-    econv3 = mb_conv_block(conv, 80, 112, strides=1)
+    econv3 = mb_conv_block(conv, 80, 112, strides=1, kernel_size=5)
 
-    conv = mb_conv_block(econv3, 112, 192)
-    econv4 = mb_conv_block(conv, 192, 320, strides=1)
+    conv = mb_conv_block(econv3, 112, 192, kernel_size=5)
+    econv4 = mb_conv_block(conv, 192, 320, strides=1, kernel_size=5)
 
     conv = mb_conv_block(econv4, 320, 512)
     econv5 = mb_conv_block(conv, 512, 512, strides=1)
@@ -124,7 +126,14 @@ def depth_prediction_effnetunet(input_tensor, res):
 
     depth_input = tf.image.resize(iconv1, res)
 
-    return conv2d(1, activation='softplus')(depth_input)
+    depth_output = conv2d(1, activation='softplus')(depth_input)
+    depth_output1 = conv2d(1, activation='softplus')(iconv1)
+    depth_output2 = conv2d(1, activation='softplus')(iconv2)
+    #depth_output3 = conv2d(1, activation='softplus')(iconv3)
+    #depth_output4 = conv2d(1, activation='softplus')(iconv4)
+    #depth_output5 = conv2d(1, activation='softplus')(iconv5)
+
+    return depth_output, depth_output1, depth_output2#, depth_output3#, depth_output4, depth_output5
 
 # https://github.com/google-research/google-research/blob/ce4e9e70127b1560f73616fba657f01a2b388aee/depth_from_video_in_the_wild/motion_prediction_net.py#L202
 def refine_motion_field(motion_field, layer):
@@ -139,44 +148,51 @@ def refine_motion_field(motion_field, layer):
 
     return upsampled_motion_field + conv2d(motion_field.shape.as_list()[-1], kernel_size=1)(conv_output)
 
-def egonet(input_tensor, batch_size):
-    #conv1 = conv2d(16, strides=2, activation='relu')(input_tensor)
-    #conv2 = conv2d(32, strides=2, activation='relu')(conv1)
-    #conv3 = conv2d(64, strides=2, activation='relu')(conv2)
-    #conv4 = conv2d(128, strides=2, activation='relu')(conv3)
-    #conv5 = conv2d(256, strides=2, activation='relu')(conv4)
-    #conv6 = conv2d(512, strides=2, activation='relu')(conv5)
-    #conv7 = conv2d(768, strides=2, activation='relu')(conv6)
+def id_generator(size=6, chars=string.ascii_uppercase + string.digits):
+    return ''.join(random.choice(chars) for _ in range(size))
 
+class Var(layers.Layer):
+    def __init__(self, value_min, name=None):
+        super().__init__(name=name)
+
+        self.value_min = value_min
+        self.value = tf.Variable(0.01, constraint=self.constraint, name=id_generator(10))
+
+    def constraint(self, x):
+        return tf.nn.relu(x - self.value_min) + self.value_min
+
+    def call(self, input_tensor):
+        return input_tensor * self.value
+
+def egonet(input_tensor, batch_size):
     conv1 = mb_conv_block(input_tensor, 6, 32)
     conv2 = mb_conv_block(conv1, 32, 64)
     conv3 = mb_conv_block(conv2, 64, 128)
-    conv4 = mb_conv_block(conv3, 128, 256)
-    conv5 = mb_conv_block(conv4, 256, 256)
-    #conv6 = mb_conv_block(conv5, 80, 112)
-    #conv7 = mb_conv_block(conv6, 256, 512)
+    conv4 = mb_conv_block(conv3, 128, 196)
+    conv5 = mb_conv_block(conv4, 196, 256)
+    conv6 = mb_conv_block(conv5, 256, 384)
+    conv7 = mb_conv_block(conv6, 384, 512)
 
-    #bottleneck = tf.reduce_mean(conv7, axis=[1, 2], keepdims=True)
-    bottleneck = tf.reduce_mean(conv5, axis=[1, 2], keepdims=True)
+    bottleneck = tf.reduce_mean(conv7, axis=[1, 2], keepdims=True)
     background_motion = conv2d(6, kernel_size=1)(bottleneck)
 
-    rotation = background_motion[:,0,0,:3] * tf.constant(0.001)
+    rotation = background_motion[:,0,0,:3]
+    rotation = Var(0.001, name=id_generator(10))(rotation)
     translation = background_motion[...,3:]
 
     #residual_translation = refine_motion_field(translation, conv7)
-    #residual_translation = refine_motion_field(translation, conv6)
-    residual_translation = refine_motion_field(translation, conv5)
-    residual_translation = refine_motion_field(residual_translation, conv4)
-    residual_translation = refine_motion_field(residual_translation, conv3)
-    residual_translation = refine_motion_field(residual_translation, conv2)
-    residual_translation = refine_motion_field(residual_translation, conv1)
-    residual_translation = refine_motion_field(residual_translation, input_tensor)
+    #residual_translation = refine_motion_field(residual_translation, conv6)
+    #residual_translation = refine_motion_field(residual_translation, conv5)
+    #residual_translation = refine_motion_field(residual_translation, conv4)
+    #residual_translation = refine_motion_field(residual_translation, conv3)
+    #residual_translation = refine_motion_field(residual_translation, conv2)
+    #residual_translation = refine_motion_field(residual_translation, conv1)
+    #residual_translation = refine_motion_field(residual_translation, input_tensor)
 
-    translation *= tf.constant(0.001)
-    residual_translation *= tf.constant(0.001)
+    translation_scale = Var(0.001)
 
-    #conv = layers.GlobalAveragePooling2D()(conv)
-    #transformation = layers.Dense(6)(conv) * tf.constant(0.001)
+    translation = translation_scale(translation)
+    #residual_translation = translation_scale(residual_translation)
 
     foci = layers.Dense(2, activation='softplus')(bottleneck)[:,0,0,:]
     offset = (layers.Dense(2)(bottleneck) + tf.constant(0.5))[:,0,0,:]
@@ -190,15 +206,12 @@ def egonet(input_tensor, batch_size):
     last_row = tf.tile([[[0.0, 0.0, 1.0]]], [batch_size, 1, 1])
     intrinsics = tf.concat([intrinsic_mat, last_row], axis=-2)
 
-    return (rotation, translation), residual_translation, intrinsics
+    return (rotation, translation), intrinsics
 
 def get_model(input_tensor, batch_size, res):
     # NOTE: Input shape == (BATCH_SIZE, RES[0], RES[1], 6)
     #       where the channels refer to two images (first, second)
-    depth_out = depth_prediction_resnet18unet(input_tensor[...,:3], res)
-    depth = keras.Model(input_tensor, depth_out)
-    transformation, res_trans, intrinsics = egonet(input_tensor, batch_size)
-    ego_out = (transformation, res_trans, intrinsics)
-    ego = keras.Model(input_tensor, ego_out)
+    depth = keras.Model(input_tensor, depth_prediction_effnetunet(input_tensor[...,:3], res), name="depth_net")
+    ego = keras.Model(input_tensor, egonet(input_tensor, batch_size), name="ego_net")
 
     return keras.Model(input_tensor, (depth(input_tensor), *(ego(input_tensor))))

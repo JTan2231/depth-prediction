@@ -76,8 +76,20 @@ def _smoothness_helper(motion_map):
     tf.summary.image('motion_sm', sm_loss)
     return tf.reduce_mean(sm_loss)
 
+IMAGENET_MEAN = tf.reshape([0.485, 0.486, 0.406], (1, 1, 1, 3))
+IMAGENET_STD = tf.reshape([0.229, 0.224, 0.225], (1, 1, 1, 3))
+def deimagenet(images):
+    images *= IMAGENET_STD
+    images += IMAGENET_MEAN
+
+    return images
+
 #@tf.function
 def rgb_loss_function(rgb1, rgb2, depth1, depth2, trans1, trans2, intrinsics, writer, step):
+    with writer.as_default():
+        tf.summary.text("intrinsics", str(intrinsics).split(',')[0].split('(')[-1].strip('\n'), step+1)
+        writer.flush()
+
     rot1, transl1 = trans1
     rot2, transl2 = trans1
 
@@ -85,8 +97,9 @@ def rgb_loss_function(rgb1, rgb2, depth1, depth2, trans1, trans2, intrinsics, wr
 
     pixel_xy = tf.concat([tf.expand_dims(pixel_x, -1), tf.expand_dims(pixel_y, -1)], axis=-1)
     
-    mask = clamp_and_mask(pixel_x, pixel_y, depth1_warped)    
-    mask = tf.expand_dims(mask, -1)[...,0]
+    mask = clamp_and_mask(pixel_x, pixel_y, depth1_warped)
+    valid_mask = tf.expand_dims(mask, -1)
+    mask = valid_mask[...,0]
 
     motion_loss = motion_field_consistency_loss(pixel_xy, mask, rot1, transl1, rot2, transl2)
     
@@ -106,43 +119,40 @@ def rgb_loss_function(rgb1, rgb2, depth1, depth2, trans1, trans2, intrinsics, wr
     depth_prox_weight = tf.stop_gradient(depth_prox_weight)
 
     ssim_loss, avg_weight = weighted_ssim(resampled_rgb, rgb2, depth_prox_weight, c1=float('inf'), c2=9e-6)
-    ssim_loss = tf.math.reduce_mean(ssim_loss * avg_weight) * 3.0
+    ssim_loss = tf.math.reduce_mean(ssim_loss * avg_weight) * 1.5
 
-    rgb_loss = tf.math.abs(resampled_rgb - rgb2)
+    rgb_loss = tf.math.abs(resampled_rgb - rgb2) * tf.expand_dims(depth1_closer, -1)
     rgb_loss = tf.math.reduce_mean(rgb_loss) * 0.85
 
     depth_loss = tf.math.abs(resampled_depth2 - depth1_warped) * depth1_closer
     depth_loss = tf.math.reduce_mean(depth_loss) * 0.01
 
-    #ssim_loss = 1 - tf.image.ssim(resampled_rgb, rgb2, 1., filter_size=3)#weighted_ssim_loss(rgb2, resampled_rgb, depth1, depth2, transformation, intrinsics)#1 - tf.image.ssim(resampled_rgb, rgb2, 1.)
-    #ssim_loss = tf.math.reduce_mean(ssim_loss)
     disp1 = disparity_from_depth(depth1)
-    disp1_mean = tf.math.reduce_mean(depth1, axis=[1, 2, 3], keepdims=True)
-    smoothness_loss = tf.math.reduce_mean(depth_smoothness(disp1 / disp1_mean, rgb1))
-    smoothness_loss += _smoothness(transl1)
-    smoothness_loss += _smoothness(transl2)
-    smoothness_loss *= 0.01
-
-    image_loss_scalar = 0.85
+    depth_smoothness_loss = tf.math.reduce_mean(depth_smoothness(disp1, rgb1)) * 0.01
+    trans_smoothness_loss = _smoothness(transl1) * 0.001
+    trans_smoothness_loss += _smoothness(transl2) * 0.001
 
     total_loss = ssim_loss + rgb_loss + depth_loss
-    total_loss += smoothness_loss
+    total_loss += depth_smoothness_loss# + trans_smoothness_loss
     total_loss += motion_loss
 
     interval = 500
     with writer.as_default():
         if (step+1) % interval == 0:
-            tf.summary.image("rgb1", rgb1, (step+1)//interval)
-            tf.summary.image("rgb2", rgb2, (step+1)//interval)
-            tf.summary.image("translation1", (transl1 + tf.reduce_min(transl1)) / tf.reduce_max(transl1), (step+1)//interval)
-            tf.summary.image("translation2", (transl2 + tf.reduce_min(transl2)) / tf.reduce_max(transl2), (step+1)//interval)
+            tf.summary.image("resampled_rgb", deimagenet(resampled_rgb), (step+1)//interval)
+            tf.summary.image("rgb1", deimagenet(rgb1), (step+1)//interval)
+            tf.summary.image("rgb2", deimagenet(rgb2), (step+1)//interval)
             tf.summary.image("depth1", depth1 / tf.reduce_max(depth1), (step+1)//interval)
             tf.summary.image("depth2", depth2 / tf.reduce_max(depth1), (step+1)//interval)
 
+        tf.summary.scalar("total_loss", total_loss, step+1)
         tf.summary.scalar("ssim_loss", ssim_loss, step+1)
         tf.summary.scalar("rgb_loss", rgb_loss, step+1)
-        tf.summary.scalar("smoothness_loss", smoothness_loss, step+1)
         tf.summary.scalar("depth_loss", depth_loss, step+1)
+        tf.summary.scalar("depth_smoothness_loss", depth_smoothness_loss, step+1)
+        tf.summary.scalar("trans_smoothness_loss", trans_smoothness_loss, step+1)
         tf.summary.scalar("motion_loss", motion_loss, step+1)
+
+        writer.flush()
 
     return total_loss, depth1, resampled_rgb

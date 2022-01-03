@@ -164,7 +164,7 @@ def depth_smoothness(depth, img):
 
 def disparity_from_depth(depth):
     disparity = 1. / (depth+0.01)
-    disparity_mean = tf.math.reduce_mean(disparity, axis=[1, 2], keepdims=True)
+    disparity_mean = tf.math.reduce_mean(disparity, axis=[1, 2, 3], keepdims=True)
     disparity /= disparity_mean
 
     return disparity
