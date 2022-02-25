@@ -14,8 +14,6 @@ tfrecord_format = {
 }
 ```
 
-A lot of the code is used from 
-
 ## TODO
 - Changing training directories, log directories, etc. from launch instead of having to change the code manually.
 - Uploading weights
