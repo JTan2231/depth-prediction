@@ -52,22 +52,22 @@ def together(im1, im2):
 
 inp = tf.keras.Input((RESOLUTION[0], RESOLUTION[1], 6))
 model = get_model(inp, 1, RESOLUTION)
-model.load_weights("logs/run3/weights220.h5")
+model.load_weights("weights/weights200.h5")
 
 i = randrange(len(all_images)-1)
 im1, im2 = preprocess(all_images[i]), preprocess(all_images[i+1])
 
 images = together(im1, im2)
 
-depth, _, _, _ = model(images)
-depth = depth[0]
+depth, _, _ = model(images)
+depth = depth[0][0]
 
 print(tf.math.reduce_mean(im2 - im1))
 
 images = together(im2, im1)
 
-depth2, _, _, _ = model(images)
-depth2 = depth2[0]
+depth2, _, _ = model(images)
+depth2 = depth2[0][0]
 
 # create figure
 fig = pl.figure(figsize=(10, 7))
@@ -84,20 +84,20 @@ pl.title("im1")
   
 fig.add_subplot(rows, columns, 2)
   
-pl.imshow(depth)
+pl.imshow(1. / depth)
 pl.axis('off')
-pl.title("Second")
+pl.title("disparity1")
 
 fig.add_subplot(rows, columns, 3)
   
 pl.imshow(deimagenet(im2))
 pl.axis('off')
-pl.title("im1")
+pl.title("im2")
   
 fig.add_subplot(rows, columns, 4)
   
 pl.imshow(1. / depth2)
 pl.axis('off')
-pl.title("Second")
+pl.title("disparity2")
 
 pl.show()

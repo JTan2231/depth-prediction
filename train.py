@@ -8,7 +8,6 @@ import tensorflow.keras as keras
 
 from time import time
 
-#from net import DepthEgoNet
 #from mod_resnet18 import depth_prediction_resnet18unet, get_model
 from effnet import get_model
 from loss import rgb_loss_function, matrix_from_angles
