@@ -3,6 +3,8 @@
 This model takes as input two consecutive images from video, and predicts a depth map for the first as well as the transformation between the two perspectives.
 A lot of the code for the loss function is taken from [here](https://github.com/google-research/google-research/tree/master/depth_from_video_in_the_wild).
 
+The primary motivation for this repository was to update the aforementioned link to a TensorFlow 2.0 repository, because I think the concept is _really_ cool. I plan on incorporating later advances in the topic in this repo as well.
+
 The code uploaded here *should* work. I'm still in the process of training/uploading weights though.
 
 `display.py` contains code to load the model and display inputs and outputs, but it assumes a certain directory setup. You'll have to setup a file list of jpegs to use.
