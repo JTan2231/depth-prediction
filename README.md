@@ -14,7 +14,14 @@ tfrecord_format = {
 }
 ```
 
+You can see an example below, about 200k training steps in:
+![Figure_1](https://user-images.githubusercontent.com/37962780/155933053-917de86a-1a96-4258-b5f5-ddb24b8810bd.png)
+You can get a similar output for the above using the weights currently in the releases section. I'm still working on completing training.
+
+
+
 ## TODO
 - Changing training directories, log directories, etc. from launch instead of having to change the code manually.
 - Uploading weights
 - Cleanup the directory
+- Complete training
