@@ -1,4 +1,5 @@
 import os
+import sys
 import matplotlib.pyplot as pl
 import tensorflow as tf
 from random import randrange
@@ -6,25 +7,13 @@ from natsort import natsorted
 from effnet import get_model
 
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
-assert len(physical_devices) > 0, "Not enough GPU hardware devices available"
-tf.config.experimental.set_memory_growth(physical_devices[0], True)
+if len(physical_devices) > 0:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 IMAGENET_MEAN = tf.reshape([0.485, 0.486, 0.406], (1, 1, 3))
 IMAGENET_STD = tf.reshape([0.229, 0.224, 0.225], (1, 1, 3))
 
 RESOLUTION = (128, 416)
-
-kitti_base = "./data/kitti/dataset/sequences/"
-kitti_folders = [kitti_base+s+'/' for s in os.listdir(kitti_base)]
-kitti_images = []
-for folder in kitti_folders:
-    kitti_images += natsorted([folder+"image_2/"+s for s in os.listdir(folder+"image_2/")])
-
-nuscenes_base = "./data/nuscenes/sweeps/CAM_FRONT/"
-nuscenes_images = natsorted([nuscenes_base+s for s in os.listdir(nuscenes_base)])
-
-#all_images = nuscenes_images + kitti_images
-all_images = kitti_images
 
 def preprocess(filepath):
     image = tf.io.read_file(filepath)
@@ -49,54 +38,56 @@ def together(im1, im2):
 
     return images
 
-inp = tf.keras.Input((RESOLUTION[0], RESOLUTION[1], 6))
-model = get_model(inp, 1, RESOLUTION)
-model.load_weights("weights/weights200.h5")
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        exit("Error: -w <weights> -i <image (jpg)>")
 
-i = randrange(len(all_images)-1)
-im1, im2 = preprocess(all_images[i]), preprocess(all_images[i+1])
+    opts = [opt[1:] for opt in sys.argv[1:] if opt.startswith("-")]
+    args = [arg for arg in sys.argv[1:] if not arg.startswith("-")]
 
-images = together(im1, im2)
+    arg_dict = dict()
+    for o, a in zip(opts, args):
+        arg_dict[o] = a
 
-depth, _, _ = model(images)
-depth = depth[0][0]
+    weights = ''
+    if arg_dict.get('w', '') == '':
+        exit("Error: No weights. python display.py -w <weights> -i <image (jpg)>")
+    else:
+        weights = arg_dict['w']
 
-print(tf.math.reduce_mean(im2 - im1))
+    image = ''
+    if arg_dict.get('i', '') == '':
+        exit("Error: No image. python display.py -w <weights> -i <image (jpg)>")
+    else:
+        image = arg_dict['i']
 
-images = together(im2, im1)
+    inp = tf.keras.Input((RESOLUTION[0], RESOLUTION[1], 6))
+    model = get_model(inp, 1, RESOLUTION)
+    model.load_weights(weights)
 
-depth2, _, _ = model(images)
-depth2 = depth2[0][0]
+    im = preprocess(image)
+    images = together(im, im)
 
-# create figure
-fig = pl.figure(figsize=(10, 7))
-  
-# setting values to rows and column variables
-rows = 2
-columns = 2
- 
-fig.add_subplot(rows, columns, 1)
-  
-pl.imshow(deimagenet(im1))
-pl.axis('off')
-pl.title("im1")
-  
-fig.add_subplot(rows, columns, 2)
-  
-pl.imshow(1. / depth)
-pl.axis('off')
-pl.title("disparity1")
+    depth, _, _ = model(images)
+    depth = depth[0][0]
 
-fig.add_subplot(rows, columns, 3)
-  
-pl.imshow(deimagenet(im2))
-pl.axis('off')
-pl.title("im2")
-  
-fig.add_subplot(rows, columns, 4)
-  
-pl.imshow(1. / depth2)
-pl.axis('off')
-pl.title("disparity2")
+    # create figure
+    fig = pl.figure(figsize=(10, 4))
+      
+    # setting values to rows and column variables
+    rows = 1
+    columns = 2
+     
+    fig.add_subplot(rows, columns, 1)
+      
+    pl.imshow(deimagenet(im))
+    pl.axis('off')
+    pl.title("image")
+      
+    fig.add_subplot(rows, columns, 2)
+      
+    pl.imshow(1. / depth)
+    pl.axis('off')
+    pl.title("disparity")
 
-pl.show()
+    pl.show()
