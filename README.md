@@ -7,7 +7,8 @@ The primary motivation for this repository was to update the aforementioned link
 
 The code uploaded here *should* work. I'm still in the process of training/uploading weights though.
 
-`display.py` contains code to load the model and display inputs and outputs, but it assumes a certain directory setup. You'll have to setup a file list of jpegs to use.
+Run `python display.py -w <weights file> -i <jpeg image>` to see an example.
+
 `dataset.py` expects a folder of TFRecords of the format:
 ```
 tfrecord_format = {
