@@ -3,7 +3,6 @@ import matplotlib.pyplot as pl
 import tensorflow as tf
 from random import randrange
 from natsort import natsorted
-#from mod_resnet18 import depth_prediction_resnet18unet, get_model
 from effnet import get_model
 
 physical_devices = tf.config.experimental.list_physical_devices('GPU')

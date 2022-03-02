@@ -4,8 +4,6 @@ import tensorflow as tf
 import tensorflow.keras as keras
 import tensorflow.keras.layers as layers
 
-from mod_resnet18 import depth_prediction_resnet18unet
-
 def conv2d(filters,    
            kernel_size=3,    
            dilation_rate=1,    
@@ -75,7 +73,7 @@ def mb_conv_block(input_tensor, input_filters, output_filters, kernel_size=3, st
         if strides == 1:
             shortcut = tf.image.resize(input_tensor, x.shape[1:3])
         else:
-            shortcut = tf.image.resize(input_tensor, x.shape[1:3])#tf.nn.max_pool(input_tensor, [1, strides, strides, 1], [1, strides, strides, 1], 'VALID')
+            shortcut = tf.image.resize(input_tensor, x.shape[1:3])
     else:
         shortcut = layers.Conv2D(output_filters, kernel_size, strides=strides, padding='same', use_bias=False)(input_tensor)
 
@@ -88,7 +86,6 @@ def encoder_effnet(input_tensor):
     conv = layers.Conv2D(32, 7, strides=2)(input_tensor)
     conv = layers.BatchNormalization()(conv)
     econv1 = tf.nn.swish(conv)
-    #conv = tf.nn.max_pool(econv1, [1, 3, 3, 1], [1, 2, 2, 1], 'SAME')
 
     conv = mb_conv_block(conv, 16, 24, strides=1)
     econv2 = mb_conv_block(conv, 24, 40, strides=1)
@@ -129,11 +126,8 @@ def depth_prediction_effnetunet(input_tensor, res):
     depth_output = conv2d(1, activation='softplus')(depth_input)
     depth_output1 = conv2d(1, activation='softplus')(iconv1)
     depth_output2 = conv2d(1, activation='softplus')(iconv2)
-    #depth_output3 = conv2d(1, activation='softplus')(iconv3)
-    #depth_output4 = conv2d(1, activation='softplus')(iconv4)
-    #depth_output5 = conv2d(1, activation='softplus')(iconv5)
 
-    return depth_output, depth_output1, depth_output2#, depth_output3#, depth_output4, depth_output5
+    return depth_output, depth_output1, depth_output2
 
 # https://github.com/google-research/google-research/blob/ce4e9e70127b1560f73616fba657f01a2b388aee/depth_from_video_in_the_wild/motion_prediction_net.py#L202
 def refine_motion_field(motion_field, layer):
@@ -180,19 +174,9 @@ def egonet(input_tensor, batch_size):
     rotation = Var(0.001, name=id_generator(10))(rotation)
     translation = background_motion[...,3:]
 
-    #residual_translation = refine_motion_field(translation, conv7)
-    #residual_translation = refine_motion_field(residual_translation, conv6)
-    #residual_translation = refine_motion_field(residual_translation, conv5)
-    #residual_translation = refine_motion_field(residual_translation, conv4)
-    #residual_translation = refine_motion_field(residual_translation, conv3)
-    #residual_translation = refine_motion_field(residual_translation, conv2)
-    #residual_translation = refine_motion_field(residual_translation, conv1)
-    #residual_translation = refine_motion_field(residual_translation, input_tensor)
-
     translation_scale = Var(0.001)
 
     translation = translation_scale(translation)
-    #residual_translation = translation_scale(residual_translation)
 
     foci = layers.Dense(2, activation='softplus')(bottleneck)[:,0,0,:]
     offset = (layers.Dense(2)(bottleneck) + tf.constant(0.5))[:,0,0,:]

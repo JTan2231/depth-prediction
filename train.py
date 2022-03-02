@@ -8,7 +8,6 @@ import tensorflow.keras as keras
 
 from time import time
 
-#from mod_resnet18 import depth_prediction_resnet18unet, get_model
 from effnet import get_model
 from loss import rgb_loss_function, matrix_from_angles
 from dataset import get_dataset
@@ -41,12 +40,13 @@ model = get_model(inp, BATCH_SIZE, RESOLUTION)
 if LOAD_WEIGHTS:
     model.load_weights(WEIGHT_PATH)
 model.summary()
-LR = 1e-4# / (16 / BATCH_SIZE)
+LR = 1e-4
 opt = keras.optimizers.Adam(learning_rate=LR)
 
 def switch_images(images):
     return tf.concat([images[...,-3:], images[...,0:3]], axis=-1)
 
+# Increasing memory consumption w/tf.function ??
 #@tf.function
 def train_step(image_stack, model, batch_size, reso, writer, step):
     bs = tf.constant(batch_size)
@@ -112,8 +112,6 @@ def prep_data(images, poses):
     images = tf.concat([images[:,0:1,:,:,:], images[:,-1:,:,:,:]], axis=1)
 
     images = preprocess_images(images)
-    #labels = euler.from_rotation_matrix(poses[:,-1,:3,:3]) - euler.from_rotation_matrix(poses[:,0,:3,:3])
-    #labels = tf.concat([labels, poses[:,-1,:3,-1] - poses[:,0,:3,-1]], axis=-1)
     labels = tf.zeros((4, 4), dtype=tf.float32)
 
     return images, labels
