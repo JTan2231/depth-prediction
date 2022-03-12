@@ -17,7 +17,10 @@ tfrecord_format = {
 ```
 
 You can see an example below, about 200k training steps in:
-![Figure_1](https://user-images.githubusercontent.com/37962780/155933053-917de86a-1a96-4258-b5f5-ddb24b8810bd.png)
+
+![cropped_depth](https://user-images.githubusercontent.com/37962780/158003658-bfd17b05-88b2-4cdf-8dd7-7ae751d8cdfe.gif)
+![cropped_rgb](https://user-images.githubusercontent.com/37962780/158003665-d93d09a0-4df3-4398-a813-c94e46a4844f.gif)
+
 You can get a similar output for the above using the weights currently in the releases section. I'm still working on completing training.
 
 
